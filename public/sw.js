@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gaitsense-v1';
+const CACHE_NAME = 'gaitsense-v2';
 
 // App shell assets to cache on install
 const SHELL_ASSETS = [
