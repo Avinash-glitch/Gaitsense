@@ -286,6 +286,21 @@ export default function VideoCapture() {
             />
           )}
 
+          {/* Camera flip button — always on top of everything including popup */}
+          {!store.isRecording && !useFileInput && (
+            <button
+              onClick={switchCamera}
+              title={`Switch to ${facingMode === 'environment' ? 'front' : 'rear'} camera`}
+              className="absolute top-3 right-3 z-30 bg-black/70 hover:bg-black/90 border border-white/20 text-white rounded-full p-2.5 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 7h-3.5L14 4h-4L7.5 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
+                <circle cx="12" cy="13" r="3"/>
+                <path d="m15 13-2-2-2 2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          )}
+
           {/* Pose overlay */}
           <PoseOverlay
             landmarks={landmarks}
@@ -352,18 +367,6 @@ export default function VideoCapture() {
                   Start Now
                 </button>
 
-                {!useFileInput && (
-                  <button
-                    onClick={switchCamera}
-                    className="mt-3 w-full py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 rounded-xl transition-colors text-sm flex items-center justify-center gap-2"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M20 7h-3.5L14 4h-4L7.5 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
-                      <circle cx="12" cy="13" r="3"/>
-                    </svg>
-                    Switch to {facingMode === 'environment' ? 'Front' : 'Rear'} Camera
-                  </button>
-                )}
 
                 <p className="text-gray-600 text-xs mt-4">
                   Make sure you have 4–5 m of clear space to walk
