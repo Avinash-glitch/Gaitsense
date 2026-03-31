@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useGaitStore } from '../../store/gaitStore'
 import { usePoseDetection } from '../../hooks/usePoseDetection'
 import { useGaitAnalysis } from '../../hooks/useGaitAnalysis'
@@ -19,8 +19,12 @@ export default function VideoCapture() {
   const fileVideoRef = useRef<HTMLVideoElement>(null)
   const loopRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null)
 
-  const [countdown, setCountdown] = useState<number | null>(3)
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
+  const [showReadyPopup, setShowReadyPopup] = useState(false)
+  const [listeningForReady, setListeningForReady] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [landmarks, setLandmarks] = useState<Landmark3D[] | null>(null)
   const [videoDims, setVideoDims] = useState({ w: 640, h: 480 })
@@ -44,7 +48,7 @@ export default function VideoCapture() {
 
   useEffect(() => {
     initPoseDetector()
-    startCamera()
+    startCamera('environment')
 
     const handleResize = () => {
       setIsPortrait(window.innerWidth < window.innerHeight && window.innerWidth < 768)
@@ -61,12 +65,14 @@ export default function VideoCapture() {
   const cleanup = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
     if (loopRef.current) cancelAnimationFrame(loopRef.current)
+    recognitionRef.current?.stop()
   }
 
-  const startCamera = async () => {
+  const startCamera = async (mode: 'environment' | 'user') => {
     try {
+      streamRef.current?.getTracks().forEach((t) => t.stop())
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 1280, height: 720, facingMode: 'environment' },
+        video: { width: 1280, height: 720, facingMode: mode },
         audio: false,
       })
       streamRef.current = stream
@@ -79,24 +85,58 @@ export default function VideoCapture() {
     }
   }
 
-  // Countdown then start
+  const switchCamera = async () => {
+    const newMode = facingMode === 'environment' ? 'user' : 'environment'
+    setFacingMode(newMode)
+    await startCamera(newMode)
+  }
+
+  // When model loads, show the "say ready" popup and start listening
   useEffect(() => {
     if (!isLoaded) return
-    let count = 3
-    setCountdown(3)
-    const t = setInterval(() => {
-      count--
-      if (count <= 0) {
-        clearInterval(t)
-        setCountdown(null)
-        const vid = videoRef.current || fileVideoRef.current
-        if (vid) startRecording(vid)
-      } else {
-        setCountdown(count)
-      }
-    }, 1000)
-    return () => clearInterval(t)
+    setShowReadyPopup(true)
+    startListeningForReady()
   }, [isLoaded]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const startListeningForReady = useCallback(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SR) return
+
+    const recognition = new SR()
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = 'en-US'
+
+    recognition.onstart = () => setListeningForReady(true)
+    recognition.onend = () => setListeningForReady(false)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recognition.onresult = (e: any) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const transcript = e.results[i][0].transcript.toLowerCase().trim()
+        if (transcript.includes('ready')) {
+          recognition.stop()
+          handleStart()
+          break
+        }
+      }
+    }
+
+    recognition.onerror = () => {
+      setListeningForReady(false)
+    }
+
+    recognitionRef.current = recognition
+    recognition.start()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleStart = useCallback(() => {
+    recognitionRef.current?.stop()
+    setShowReadyPopup(false)
+    const vid = videoRef.current || fileVideoRef.current
+    if (vid) startRecording(vid)
+  }, [startRecording])
 
   // Elapsed timer
   useEffect(() => {
@@ -166,9 +206,8 @@ export default function VideoCapture() {
             setLiveRightStrike(strikeR)
           }
 
-          // Rough cadence estimate
           setLiveCadence(store.frames.length > 0 ? Math.min(160, (store.passProgress.front + store.passProgress.rear + store.passProgress.left_side + store.passProgress.right_side) * 20) : 0)
-          setLiveSymmetry(50 + Math.random() * 10) // smoothed live estimate
+          setLiveSymmetry(50 + Math.random() * 10)
         }
       }
       loopRef.current = requestAnimationFrame(run)
@@ -242,15 +281,70 @@ export default function VideoCapture() {
             currentPass={store.currentPass}
           />
 
-          {/* Countdown overlay */}
-          {countdown !== null && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/70">
-              <div className="text-8xl font-black text-blue-400">{countdown}</div>
+          {/* Camera switch button */}
+          {!store.isRecording && !useFileInput && (
+            <button
+              onClick={switchCamera}
+              title="Switch camera"
+              className="absolute top-3 left-3 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 transition-colors z-10"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                <circle cx="12" cy="13" r="4"/>
+                <path d="M9 13a3 3 0 0 0 6 0"/>
+                <path d="M7.5 11.5 9 13l1.5-1.5"/>
+              </svg>
+            </button>
+          )}
+
+          {/* "Say Ready" popup overlay */}
+          {showReadyPopup && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/75 z-20">
+              <div className="bg-gray-900 border border-indigo-500/40 rounded-2xl p-8 mx-4 max-w-sm w-full text-center shadow-2xl">
+                {/* Mic animation */}
+                <div className="relative inline-flex items-center justify-center mb-5">
+                  {listeningForReady && (
+                    <span className="absolute inline-flex h-16 w-16 rounded-full bg-indigo-500/30 animate-ping" />
+                  )}
+                  <div className={`relative w-16 h-16 rounded-full flex items-center justify-center ${listeningForReady ? 'bg-indigo-600' : 'bg-gray-700'}`}>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-white" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z"/>
+                      <path d="M19 10v1a7 7 0 0 1-14 0v-1" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round"/>
+                      <line x1="12" y1="18" x2="12" y2="22" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+                      <line x1="9" y1="22" x2="15" y2="22" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+                    </svg>
+                  </div>
+                </div>
+
+                <h3 className="text-white text-xl font-bold mb-2">Ready to begin?</h3>
+                <p className="text-gray-400 text-sm mb-1">
+                  {listeningForReady
+                    ? 'Listening… say "Ready" to start'
+                    : 'Tap the button below to start'}
+                </p>
+                {listeningForReady && (
+                  <p className="text-indigo-400 text-xs mb-5">Microphone is active</p>
+                )}
+                {!listeningForReady && (
+                  <p className="text-gray-500 text-xs mb-5">Microphone not available</p>
+                )}
+
+                <button
+                  onClick={handleStart}
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-colors text-base"
+                >
+                  Start Analysis
+                </button>
+
+                <p className="text-gray-600 text-xs mt-4">
+                  Make sure you have 4–5 m of clear space to walk
+                </p>
+              </div>
             </div>
           )}
 
           {/* Model loading overlay */}
-          {!isLoaded && countdown === null && (
+          {!isLoaded && !showReadyPopup && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/70">
               <div className="text-center">
                 <div className="text-blue-400 text-lg mb-2">Loading AI model…</div>
