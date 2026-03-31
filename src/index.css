@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@media print {
+  header, .no-print { display: none; }
+  .report-section { break-inside: avoid; }
+  body { background: white; color: black; }
+  .dark { background: white !important; color: black !important; }
+  .dark * { background: white !important; color: black !important; box-shadow: none !important; }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.pulse-rec {
+  animation: pulseRec 1s infinite;
+}
+
+@keyframes pulseRec {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
