@@ -25,6 +25,7 @@ export default function VideoCapture() {
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
   const [showReadyPopup, setShowReadyPopup] = useState(false)
   const [listeningForReady, setListeningForReady] = useState(false)
+  const [readyCountdown, setReadyCountdown] = useState(5)
   const [elapsed, setElapsed] = useState(0)
   const [landmarks, setLandmarks] = useState<Landmark3D[] | null>(null)
   const [videoDims, setVideoDims] = useState({ w: 640, h: 480 })
@@ -91,12 +92,24 @@ export default function VideoCapture() {
     await startCamera(newMode)
   }
 
-  // When model loads, show the "say ready" popup and start listening
+  // When model loads, show the "say ready" popup, start listening, and begin 5s countdown
   useEffect(() => {
     if (!isLoaded) return
     setShowReadyPopup(true)
+    setReadyCountdown(5)
     startListeningForReady()
   }, [isLoaded]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 5-second countdown — auto-starts if user doesn't say "ready" first
+  useEffect(() => {
+    if (!showReadyPopup) return
+    if (readyCountdown <= 0) {
+      handleStart()
+      return
+    }
+    const t = setTimeout(() => setReadyCountdown((c) => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [showReadyPopup, readyCountdown]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const startListeningForReady = useCallback(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -319,21 +332,39 @@ export default function VideoCapture() {
                 <h3 className="text-white text-xl font-bold mb-2">Ready to begin?</h3>
                 <p className="text-gray-400 text-sm mb-1">
                   {listeningForReady
-                    ? 'Listening… say "Ready" to start'
-                    : 'Tap the button below to start'}
+                    ? 'Say "Ready" or wait for the countdown'
+                    : 'Tap the button or wait for the countdown'}
                 </p>
                 {listeningForReady && (
-                  <p className="text-indigo-400 text-xs mb-5">Microphone is active</p>
+                  <p className="text-indigo-400 text-xs mb-3">Microphone is active</p>
                 )}
                 {!listeningForReady && (
-                  <p className="text-gray-500 text-xs mb-5">Microphone not available</p>
+                  <p className="text-gray-500 text-xs mb-3">Microphone not available</p>
                 )}
+
+                {/* Countdown ring */}
+                <div className="flex items-center justify-center mb-5">
+                  <div className="relative w-14 h-14 flex items-center justify-center">
+                    <svg className="absolute inset-0 w-14 h-14 -rotate-90" viewBox="0 0 56 56">
+                      <circle cx="28" cy="28" r="24" fill="none" stroke="#374151" strokeWidth="4" />
+                      <circle
+                        cx="28" cy="28" r="24" fill="none"
+                        stroke="#6366f1" strokeWidth="4"
+                        strokeDasharray={`${2 * Math.PI * 24}`}
+                        strokeDashoffset={`${2 * Math.PI * 24 * (1 - readyCountdown / 5)}`}
+                        className="transition-all duration-1000"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <span className="text-white text-2xl font-black">{readyCountdown}</span>
+                  </div>
+                </div>
 
                 <button
                   onClick={handleStart}
                   className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-colors text-base"
                 >
-                  Start Analysis
+                  Start Now
                 </button>
 
                 <p className="text-gray-600 text-xs mt-4">
