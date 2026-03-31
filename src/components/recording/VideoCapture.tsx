@@ -69,11 +69,12 @@ export default function VideoCapture() {
     recognitionRef.current?.stop()
   }
 
-  const startCamera = async (mode: 'environment' | 'user') => {
+  const startCamera = async (mode: 'environment' | 'user', isSwitch = false) => {
     try {
       streamRef.current?.getTracks().forEach((t) => t.stop())
+      // Use { ideal } so the browser picks the closest match rather than rejecting
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 1280, height: 720, facingMode: mode },
+        video: { facingMode: { ideal: mode } },
         audio: false,
       })
       streamRef.current = stream
@@ -82,14 +83,15 @@ export default function VideoCapture() {
         videoRef.current.play()
       }
     } catch {
-      setUseFileInput(true)
+      // Only fall back to file input on initial load — not on a camera switch
+      if (!isSwitch) setUseFileInput(true)
     }
   }
 
   const switchCamera = async () => {
     const newMode = facingMode === 'environment' ? 'user' : 'environment'
     setFacingMode(newMode)
-    await startCamera(newMode)
+    await startCamera(newMode, true)
   }
 
   // When model loads, show the "say ready" popup, start listening, and begin 5s countdown
