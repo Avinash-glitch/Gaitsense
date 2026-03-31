@@ -24,7 +24,7 @@ export default function Header() {
           <ellipse cx="6" cy="13" rx="2" ry="3" fill="currentColor" opacity="0.5" />
           <path d="M8 14 Q12 18 14 20 Q16 22 18 21 Q20 20 18 18 Q16 16 12 13 Z" fill="currentColor" />
         </svg>
-        <span className="text-white font-bold text-lg tracking-tight">GaitSense AI</span>
+        <span className="text-white font-bold text-lg tracking-tight">Gaitsense</span>
       </div>
 
       {/* Step indicator */}
