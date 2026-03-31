@@ -294,21 +294,6 @@ export default function VideoCapture() {
             currentPass={store.currentPass}
           />
 
-          {/* Camera switch button */}
-          {!store.isRecording && !useFileInput && (
-            <button
-              onClick={switchCamera}
-              title="Switch camera"
-              className="absolute top-3 left-3 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 transition-colors z-10"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                <circle cx="12" cy="13" r="4"/>
-                <path d="M9 13a3 3 0 0 0 6 0"/>
-                <path d="M7.5 11.5 9 13l1.5-1.5"/>
-              </svg>
-            </button>
-          )}
 
           {/* "Say Ready" popup overlay */}
           {showReadyPopup && (
@@ -366,6 +351,19 @@ export default function VideoCapture() {
                 >
                   Start Now
                 </button>
+
+                {!useFileInput && (
+                  <button
+                    onClick={switchCamera}
+                    className="mt-3 w-full py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 rounded-xl transition-colors text-sm flex items-center justify-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20 7h-3.5L14 4h-4L7.5 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
+                      <circle cx="12" cy="13" r="3"/>
+                    </svg>
+                    Switch to {facingMode === 'environment' ? 'Front' : 'Rear'} Camera
+                  </button>
+                )}
 
                 <p className="text-gray-600 text-xs mt-4">
                   Make sure you have 4–5 m of clear space to walk
