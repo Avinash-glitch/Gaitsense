@@ -9,6 +9,50 @@ import PassIndicator from './PassIndicator'
 import type { Landmark3D, ArchType, StrikePattern } from '../../types/gait.types'
 import { LM } from '../../utils/landmarkHelpers'
 
+type PositionFeedback = 'too_close' | 'too_far' | 'move_left' | 'move_right' | 'good' | null
+
+function getPositionFeedback(lm: Landmark3D[]): PositionFeedback {
+  const lShoulder = lm[LM.LEFT_SHOULDER]
+  const rShoulder = lm[LM.RIGHT_SHOULDER]
+  const lHip     = lm[LM.LEFT_HIP]
+  const rHip     = lm[LM.RIGHT_HIP]
+  const lHeel    = lm[LM.LEFT_HEEL]
+  const rHeel    = lm[LM.RIGHT_HEEL]
+
+  const hipVis      = Math.min(lHip?.visibility ?? 0, rHip?.visibility ?? 0)
+  const shoulderVis = Math.min(lShoulder?.visibility ?? 0, rShoulder?.visibility ?? 0)
+  const heelVis     = Math.max(lHeel?.visibility ?? 0, rHeel?.visibility ?? 0)
+
+  if (hipVis < 0.3) return 'too_far'
+
+  if (shoulderVis > 0.4) {
+    const topY    = Math.min(lShoulder?.y ?? 1, rShoulder?.y ?? 1)
+    const bottomY = Math.max(lHeel?.y ?? 0, rHeel?.y ?? 0)
+    const span    = bottomY - topY
+
+    if (heelVis < 0.2 && shoulderVis > 0.5) return 'too_close' // shoulders visible, feet not
+    if (span > 0.82) return 'too_close'
+    if (span < 0.35) return 'too_far'
+
+    // Horizontal centering based on hip midpoint
+    const hipCenterX = ((lHip?.x ?? 0.5) + (rHip?.x ?? 0.5)) / 2
+    if (hipCenterX < 0.28) return 'move_right'
+    if (hipCenterX > 0.72) return 'move_left'
+
+    return 'good'
+  }
+
+  return 'too_far'
+}
+
+const FEEDBACK_CONFIG: Record<NonNullable<PositionFeedback>, { icon: string; text: string; color: string }> = {
+  too_close:  { icon: '↕',  text: 'Move further away',    color: 'bg-orange-500/80 border-orange-400' },
+  too_far:    { icon: '🔍', text: 'Move closer',           color: 'bg-blue-500/80 border-blue-400' },
+  move_left:  { icon: '←',  text: 'Move left',             color: 'bg-yellow-500/80 border-yellow-400' },
+  move_right: { icon: '→',  text: 'Move right',            color: 'bg-yellow-500/80 border-yellow-400' },
+  good:       { icon: '✓',  text: 'Good position',         color: 'bg-green-500/80 border-green-400' },
+}
+
 const isFrontLabel = (label: string) => {
   const l = label.toLowerCase()
   return l.includes('front') || l.includes('user') || l.includes('facetime') || l.includes('facing front')
@@ -49,6 +93,7 @@ export default function VideoCapture() {
   const [videoDims, setVideoDims] = useState({ w: 640, h: 480 })
   const [noMovementWarning, setNoMovementWarning] = useState(false)
   const [lowLightWarning, setLowLightWarning] = useState(false)
+  const [positionFeedback, setPositionFeedback] = useState<PositionFeedback>(null)
   const [isPortrait, setIsPortrait] = useState(false)
   const [useFileInput, setUseFileInput] = useState(false)
 
@@ -217,6 +262,7 @@ export default function VideoCapture() {
       if (vid.readyState >= 2) {
         const lm = detectPose(vid, performance.now())
         setLandmarks(lm)
+        setPositionFeedback(lm ? getPositionFeedback(lm) : 'too_far')
 
         {
           const offscreen = document.createElement('canvas')
@@ -299,8 +345,8 @@ export default function VideoCapture() {
             <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
           )}
 
-          {/* Camera flip — always shown on mobile (desktop blocked by gate) */}
-          {!store.isRecording && !useFileInput && (
+          {/* Camera flip — visible before AND during recording */}
+          {!useFileInput && (
             <button
               onClick={switchCamera}
               title={`Switch to ${facingMode === 'environment' ? 'front' : 'rear'} camera`}
@@ -393,6 +439,20 @@ export default function VideoCapture() {
           {noMovementWarning && store.isRecording && (
             <div className="absolute top-20 left-4 right-4 bg-orange-900/90 border border-orange-600 rounded-lg p-2 text-xs text-orange-200 text-center">
               No movement detected — please start walking
+            </div>
+          )}
+
+          {/* Position feedback */}
+          {positionFeedback && positionFeedback !== 'good' && (
+            <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 border rounded-full px-4 py-1.5 flex items-center gap-2 text-white text-sm font-semibold whitespace-nowrap ${FEEDBACK_CONFIG[positionFeedback].color}`}>
+              <span className="text-base">{FEEDBACK_CONFIG[positionFeedback].icon}</span>
+              <span>{FEEDBACK_CONFIG[positionFeedback].text}</span>
+            </div>
+          )}
+          {positionFeedback === 'good' && (
+            <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 border rounded-full px-4 py-1.5 flex items-center gap-2 text-white text-sm font-semibold ${FEEDBACK_CONFIG.good.color}`}>
+              <span>{FEEDBACK_CONFIG.good.icon}</span>
+              <span>{FEEDBACK_CONFIG.good.text}</span>
             </div>
           )}
 

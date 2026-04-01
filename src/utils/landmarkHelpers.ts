@@ -2,6 +2,8 @@ import type { Landmark3D } from '../types/gait.types'
 
 export const LM = {
   NOSE: 0,
+  LEFT_SHOULDER: 11,
+  RIGHT_SHOULDER: 12,
   LEFT_HIP: 23,
   RIGHT_HIP: 24,
   LEFT_KNEE: 25,
