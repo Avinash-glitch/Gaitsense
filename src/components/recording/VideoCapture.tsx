@@ -302,8 +302,8 @@ export default function VideoCapture() {
             <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
           )}
 
-          {/* Camera flip — only shown when >1 camera detected */}
-          {!store.isRecording && !useFileInput && availableCameras.length > 1 && (
+          {/* Camera flip — always shown on mobile (desktop blocked by gate) */}
+          {!store.isRecording && !useFileInput && (
             <button
               onClick={switchCamera}
               title={`Switch to ${facingMode === 'environment' ? 'front' : 'rear'} camera`}
