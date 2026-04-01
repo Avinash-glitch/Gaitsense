@@ -8,6 +8,15 @@ interface CheckItem {
   status: 'pending' | 'ok' | 'fail'
 }
 
+const isFrontLabel = (label: string) => {
+  const l = label.toLowerCase()
+  return l.includes('front') || l.includes('user') || l.includes('facetime') || l.includes('facing front')
+}
+const isBackLabel = (label: string) => {
+  const l = label.toLowerCase()
+  return l.includes('back') || l.includes('rear') || l.includes('environment') || l.includes('facing back')
+}
+
 export default function CameraSetup() {
   const setScreen = useGaitStore((s) => s.setScreen)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -16,6 +25,7 @@ export default function CameraSetup() {
   const { initPoseDetector, detectPose, isLoaded, error: poseError } = usePoseDetection()
 
   const [camError, setCamError] = useState<string | null>(null)
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
   const [checks, setChecks] = useState<CheckItem[]>([
     { label: 'Camera detected', status: 'pending' },
     { label: 'Enough light', status: 'pending' },
@@ -26,38 +36,38 @@ export default function CameraSetup() {
   const allOk = checks.every((c) => c.status === 'ok')
 
   const updateCheck = (label: string, status: CheckItem['status']) => {
-    setChecks((prev) =>
-      prev.map((c) => (c.label === label ? { ...c, status } : c))
-    )
+    setChecks((prev) => prev.map((c) => (c.label === label ? { ...c, status } : c)))
   }
 
   useEffect(() => {
     initPoseDetector()
-    startCamera()
+    startCamera('environment')
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop())
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const startCamera = async () => {
+  const startCamera = async (mode: 'environment' | 'user') => {
+    setCamError(null)
     try {
-      // Get permission first so device labels become available
+      streamRef.current?.getTracks().forEach((t) => t.stop())
+
+      // Request permission first so device labels populate
       const temp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
       temp.getTracks().forEach((t) => t.stop())
 
       const devices = await navigator.mediaDevices.enumerateDevices()
       const videoDevices = devices.filter((d) => d.kind === 'videoinput')
 
-      const rearCamera =
-        videoDevices.find((d) => {
-          const l = d.label.toLowerCase()
-          return l.includes('back') || l.includes('rear') || l.includes('environment') || l.includes('facing back')
-        }) ?? videoDevices[0]
+      const chosen =
+        mode === 'user'
+          ? (videoDevices.find((d) => isFrontLabel(d.label)) ?? videoDevices[0])
+          : (videoDevices.find((d) => isBackLabel(d.label)) ?? videoDevices[videoDevices.length - 1])
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: rearCamera?.deviceId
-          ? { deviceId: { exact: rearCamera.deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
-          : { facingMode: 'environment', width: 640, height: 480 },
+        video: chosen?.deviceId
+          ? { deviceId: { exact: chosen.deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
+          : { facingMode: mode, width: 640, height: 480 },
         audio: false,
       })
 
@@ -74,7 +84,13 @@ export default function CameraSetup() {
     }
   }
 
-  // Run light + body checks every 500ms once camera is ready
+  const switchCamera = async () => {
+    const newMode = facingMode === 'environment' ? 'user' : 'environment'
+    setFacingMode(newMode)
+    await startCamera(newMode)
+  }
+
+  // Run light + body checks every 600ms once pose model is ready
   useEffect(() => {
     if (!isLoaded) return
     const interval = setInterval(() => {
@@ -89,7 +105,6 @@ export default function CameraSetup() {
       canvas.height = video.videoHeight || 240
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-      // Light check
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
       const data = imageData.data
       let brightness = 0
@@ -99,7 +114,6 @@ export default function CameraSetup() {
       brightness /= data.length / 16
       updateCheck('Enough light', brightness > 60 ? 'ok' : 'fail')
 
-      // Pose checks
       const landmarks = detectPose(video, performance.now())
       if (landmarks) {
         const lHip = landmarks[LM.LEFT_HIP]
@@ -116,9 +130,7 @@ export default function CameraSetup() {
 
         const lHeel = landmarks[LM.LEFT_HEEL]
         const rHeel = landmarks[LM.RIGHT_HEEL]
-        const heelVisible =
-          (lHeel?.y ?? 0) > 0.7 || (rHeel?.y ?? 0) > 0.7
-        updateCheck('Floor visible', heelVisible ? 'ok' : 'fail')
+        updateCheck('Floor visible', (lHeel?.y ?? 0) > 0.7 || (rHeel?.y ?? 0) > 0.7 ? 'ok' : 'fail')
       } else {
         updateCheck('Full body visible', 'fail')
         updateCheck('Floor visible', 'fail')
@@ -130,11 +142,7 @@ export default function CameraSetup() {
   const statusIcon = (status: CheckItem['status']) =>
     status === 'ok' ? '✓' : status === 'fail' ? '✗' : '…'
   const statusColor = (status: CheckItem['status']) =>
-    status === 'ok'
-      ? 'text-green-400'
-      : status === 'fail'
-      ? 'text-red-400'
-      : 'text-gray-500'
+    status === 'ok' ? 'text-green-400' : status === 'fail' ? 'text-red-400' : 'text-gray-500'
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
@@ -150,20 +158,31 @@ export default function CameraSetup() {
               <p className="text-red-400 font-semibold mb-1">Camera Access Denied</p>
               <p className="text-gray-500 text-sm">{camError}</p>
               <div className="mt-4 text-xs text-gray-600 space-y-1">
-                <p>Chrome: Click the lock icon → Allow Camera</p>
-                <p>Firefox: Click the shield icon → Allow</p>
-                <p>Safari: Preferences → Websites → Camera</p>
+                <p>Chrome: tap the lock icon → Allow Camera</p>
+                <p>Safari: Settings → Safari → Camera → Allow</p>
               </div>
             </div>
           ) : (
-            <video
-              ref={videoRef}
-              className="w-full h-full object-cover"
-              muted
-              playsInline
-            />
+            <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
           )}
+
           <canvas ref={canvasRef} className="hidden" />
+
+          {/* Camera flip button */}
+          {!camError && (
+            <button
+              onClick={switchCamera}
+              title={`Switch to ${facingMode === 'environment' ? 'front' : 'rear'} camera`}
+              className="absolute top-2 right-2 z-10 bg-black/70 hover:bg-black/90 border border-white/20 text-white rounded-full p-2 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 7h-3.5L14 4h-4L7.5 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
+                <circle cx="12" cy="13" r="3"/>
+                <path d="m15 13-2-2-2 2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          )}
+
           {!isLoaded && !poseError && (
             <div className="absolute bottom-2 left-2 right-2 bg-black/60 rounded px-3 py-1 text-xs text-blue-300 text-center">
               Loading pose model…
@@ -178,7 +197,6 @@ export default function CameraSetup() {
 
         {/* Checks + tips */}
         <div className="space-y-4">
-          {/* Status checks */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
             {checks.map((check) => (
               <div key={check.label} className="flex items-center gap-3">
@@ -192,11 +210,10 @@ export default function CameraSetup() {
             ))}
           </div>
 
-          {/* Placement tips */}
           <div className="space-y-2">
             {[
-              { icon: '🪑', tip: 'Place camera at knee height on a chair or stack of books' },
-              { icon: '📏', tip: 'Stand 3–4 meters away from camera' },
+              { icon: '🪑', tip: 'Place phone at knee height on a chair or stack of books' },
+              { icon: '📏', tip: 'Stand 3–4 meters away from the phone' },
               { icon: '🚶', tip: 'Ensure 3×3m of clear walking space behind you' },
               { icon: '🦶', tip: 'Remove shoes for best arch detection' },
             ].map(({ icon, tip }) => (
