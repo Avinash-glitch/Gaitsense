@@ -41,7 +41,6 @@ export default function VideoCapture() {
   const recognitionRef = useRef<any>(null)
 
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
-  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
   const [showReadyPopup, setShowReadyPopup] = useState(false)
   const [listeningForReady, setListeningForReady] = useState(false)
   const [readyCountdown, setReadyCountdown] = useState(5)
@@ -89,9 +88,7 @@ export default function VideoCapture() {
 
   const loadVideoDevices = async (): Promise<MediaDeviceInfo[]> => {
     const devices = await navigator.mediaDevices.enumerateDevices()
-    const videoDevices = devices.filter((d) => d.kind === 'videoinput')
-    setAvailableCameras(videoDevices)
-    return videoDevices
+    return devices.filter((d) => d.kind === 'videoinput')
   }
 
   const startCamera = async (mode: 'environment' | 'user', isSwitch = false) => {
