@@ -9,6 +9,23 @@ import PassIndicator from './PassIndicator'
 import type { Landmark3D, ArchType, StrikePattern } from '../../types/gait.types'
 import { LM } from '../../utils/landmarkHelpers'
 
+const isFrontLabel = (label: string) => {
+  const l = label.toLowerCase()
+  return l.includes('front') || l.includes('user') || l.includes('facetime') || l.includes('facing front')
+}
+const isBackLabel = (label: string) => {
+  const l = label.toLowerCase()
+  return l.includes('back') || l.includes('rear') || l.includes('environment') || l.includes('facing back')
+}
+
+const pickCamera = (devices: MediaDeviceInfo[], mode: 'environment' | 'user'): MediaDeviceInfo | null => {
+  if (!devices.length) return null
+  if (mode === 'user') {
+    return devices.find((d) => isFrontLabel(d.label)) ?? devices[0]
+  }
+  return devices.find((d) => isBackLabel(d.label)) ?? devices[devices.length - 1]
+}
+
 export default function VideoCapture() {
   const store = useGaitStore()
   const { initPoseDetector, detectPose, isLoaded, error: poseError } = usePoseDetection()
@@ -19,10 +36,12 @@ export default function VideoCapture() {
   const fileVideoRef = useRef<HTMLVideoElement>(null)
   const loopRef = useRef<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const currentDeviceIdRef = useRef<string | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null)
 
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
   const [showReadyPopup, setShowReadyPopup] = useState(false)
   const [listeningForReady, setListeningForReady] = useState(false)
   const [readyCountdown, setReadyCountdown] = useState(5)
@@ -34,7 +53,6 @@ export default function VideoCapture() {
   const [isPortrait, setIsPortrait] = useState(false)
   const [useFileInput, setUseFileInput] = useState(false)
 
-  // Live metric state (rolling avg)
   const [liveCadence, setLiveCadence] = useState(0)
   const [liveSymmetry, setLiveSymmetry] = useState(50)
   const [liveLeftArch, setLiveLeftArch] = useState<ArchType>('neutral')
@@ -69,21 +87,51 @@ export default function VideoCapture() {
     recognitionRef.current?.stop()
   }
 
+  const loadVideoDevices = async (): Promise<MediaDeviceInfo[]> => {
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    const videoDevices = devices.filter((d) => d.kind === 'videoinput')
+    setAvailableCameras(videoDevices)
+    return videoDevices
+  }
+
   const startCamera = async (mode: 'environment' | 'user', isSwitch = false) => {
     try {
       streamRef.current?.getTracks().forEach((t) => t.stop())
-      // Use { ideal } so the browser picks the closest match rather than rejecting
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: mode } },
-        audio: false,
-      })
+
+      // Request permission first so that device labels become available
+      const temp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+      temp.getTracks().forEach((t) => t.stop())
+
+      const devices = await loadVideoDevices()
+      const chosen = pickCamera(devices, mode)
+
+      let stream: MediaStream
+
+      if (chosen?.deviceId) {
+        currentDeviceIdRef.current = chosen.deviceId
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId: { exact: chosen.deviceId },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        })
+      } else {
+        // fallback to facingMode hint
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: mode, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        })
+      }
+
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        videoRef.current.play()
+        await videoRef.current.play()
       }
-    } catch {
-      // Only fall back to file input on initial load — not on a camera switch
+    } catch (err) {
+      console.error('Camera error:', err)
       if (!isSwitch) setUseFileInput(true)
     }
   }
@@ -94,7 +142,7 @@ export default function VideoCapture() {
     await startCamera(newMode, true)
   }
 
-  // When model loads, show the "say ready" popup, start listening, and begin 5s countdown
+  // When model loads, show popup and start countdown
   useEffect(() => {
     if (!isLoaded) return
     setShowReadyPopup(true)
@@ -138,9 +186,7 @@ export default function VideoCapture() {
       }
     }
 
-    recognition.onerror = () => {
-      setListeningForReady(false)
-    }
+    recognition.onerror = () => setListeningForReady(false)
 
     recognitionRef.current = recognition
     recognition.start()
@@ -164,7 +210,7 @@ export default function VideoCapture() {
     return () => clearInterval(t)
   }, [store.isRecording, store.recordingStartTime])
 
-  // Live pose loop for overlay + live metrics
+  // Live pose loop
   useEffect(() => {
     if (!isLoaded) return
     const vid = videoRef.current || fileVideoRef.current
@@ -175,7 +221,6 @@ export default function VideoCapture() {
         const lm = detectPose(vid, performance.now())
         setLandmarks(lm)
 
-        // Pixel brightness check for low light warning
         {
           const offscreen = document.createElement('canvas')
           offscreen.width = 16
@@ -185,11 +230,8 @@ export default function VideoCapture() {
             octx.drawImage(vid, 0, 0, 16, 16)
             const data = octx.getImageData(0, 0, 16, 16).data
             let sum = 0
-            for (let pi = 0; pi < data.length; pi += 4) {
-              sum += (data[pi] + data[pi + 1] + data[pi + 2]) / 3
-            }
-            const brightness = sum / (16 * 16)
-            setLowLightWarning(brightness < 60)
+            for (let pi = 0; pi < data.length; pi += 4) sum += (data[pi] + data[pi + 1] + data[pi + 2]) / 3
+            setLowLightWarning(sum / (16 * 16) < 60)
           }
         }
 
@@ -198,7 +240,6 @@ export default function VideoCapture() {
           setVideoDims({ w: rect.width, h: rect.height })
         }
 
-        // No movement check
         if (store.isRecording && store.frames.length > 0) {
           const recent = store.frames.slice(-30)
           const hipXs = recent.map((f) => f.landmarks[LM.LEFT_HIP]?.x ?? 0)
@@ -206,7 +247,6 @@ export default function VideoCapture() {
           setNoMovementWarning(range < 0.01 && recent.length >= 30)
         }
 
-        // Live metrics update every 30 frames
         if (store.frames.length % 30 === 0 && store.frames.length > 10) {
           const recentFrames = store.frames.slice(-90)
           setLiveLeftArch(detectArchFromFrames(recentFrames, 'left'))
@@ -215,13 +255,11 @@ export default function VideoCapture() {
           const lHeel = lm?.[LM.LEFT_HEEL]
           const rHeel = lm?.[LM.RIGHT_HEEL]
           if (lHeel && rHeel) {
-            const strikeL: StrikePattern = lHeel.y > 0.75 ? 'heel' : lHeel.y > 0.6 ? 'midfoot' : 'forefoot'
-            const strikeR: StrikePattern = rHeel.y > 0.75 ? 'heel' : rHeel.y > 0.6 ? 'midfoot' : 'forefoot'
-            setLiveLeftStrike(strikeL)
-            setLiveRightStrike(strikeR)
+            setLiveLeftStrike(lHeel.y > 0.75 ? 'heel' : lHeel.y > 0.6 ? 'midfoot' : 'forefoot')
+            setLiveRightStrike(rHeel.y > 0.75 ? 'heel' : rHeel.y > 0.6 ? 'midfoot' : 'forefoot')
           }
 
-          setLiveCadence(store.frames.length > 0 ? Math.min(160, (store.passProgress.front + store.passProgress.rear + store.passProgress.left_side + store.passProgress.right_side) * 20) : 0)
+          setLiveCadence(Math.min(160, (store.passProgress.front + store.passProgress.rear + store.passProgress.left_side + store.passProgress.right_side) * 20))
           setLiveSymmetry(50 + Math.random() * 10)
         }
       }
@@ -229,9 +267,7 @@ export default function VideoCapture() {
     }
 
     loopRef.current = requestAnimationFrame(run)
-    return () => {
-      if (loopRef.current) cancelAnimationFrame(loopRef.current)
-    }
+    return () => { if (loopRef.current) cancelAnimationFrame(loopRef.current) }
   }, [isLoaded, detectPose, store.isRecording, store.frames, store.passProgress])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -241,22 +277,16 @@ export default function VideoCapture() {
     fileVideoRef.current.play()
   }
 
-  const formatElapsed = (s: number) => {
-    const m = Math.floor(s / 60)
-    const sec = s % 60
-    return `${m}:${sec.toString().padStart(2, '0')}`
-  }
+  const formatElapsed = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`
 
   return (
     <div className="flex flex-col md:flex-row gap-4 p-4 min-h-screen">
-      {/* Portrait warning */}
       {isPortrait && (
         <div className="fixed bottom-4 left-4 right-4 bg-yellow-900/90 border border-yellow-600 rounded-xl p-3 text-sm text-yellow-200 text-center z-50 no-print">
           Rotate to landscape for best recording experience
         </div>
       )}
 
-      {/* Left: Video */}
       <div className="flex-1 md:w-3/5">
         <div
           ref={containerRef}
@@ -265,31 +295,15 @@ export default function VideoCapture() {
         >
           {useFileInput ? (
             <>
-              <video
-                ref={fileVideoRef}
-                className="w-full h-full object-cover"
-                muted
-                loop
-                playsInline
-              />
-              <input
-                type="file"
-                accept="video/*"
-                onChange={handleFileChange}
-                className="absolute bottom-4 left-4 text-xs text-gray-400"
-              />
+              <video ref={fileVideoRef} className="w-full h-full object-cover" muted loop playsInline />
+              <input type="file" accept="video/*" onChange={handleFileChange} className="absolute bottom-4 left-4 text-xs text-gray-400" />
             </>
           ) : (
-            <video
-              ref={videoRef}
-              className="w-full h-full object-cover"
-              muted
-              playsInline
-            />
+            <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
           )}
 
-          {/* Camera flip button — always on top of everything including popup */}
-          {!store.isRecording && !useFileInput && (
+          {/* Camera flip — only shown when >1 camera detected */}
+          {!store.isRecording && !useFileInput && availableCameras.length > 1 && (
             <button
               onClick={switchCamera}
               title={`Switch to ${facingMode === 'environment' ? 'front' : 'rear'} camera`}
@@ -303,24 +317,14 @@ export default function VideoCapture() {
             </button>
           )}
 
-          {/* Pose overlay */}
-          <PoseOverlay
-            landmarks={landmarks}
-            width={videoDims.w}
-            height={videoDims.h}
-            currentPass={store.currentPass}
-          />
+          <PoseOverlay landmarks={landmarks} width={videoDims.w} height={videoDims.h} currentPass={store.currentPass} />
 
-
-          {/* "Say Ready" popup overlay */}
+          {/* "Say Ready" popup */}
           {showReadyPopup && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/75 z-20">
               <div className="bg-gray-900 border border-indigo-500/40 rounded-2xl p-8 mx-4 max-w-sm w-full text-center shadow-2xl">
-                {/* Mic animation */}
                 <div className="relative inline-flex items-center justify-center mb-5">
-                  {listeningForReady && (
-                    <span className="absolute inline-flex h-16 w-16 rounded-full bg-indigo-500/30 animate-ping" />
-                  )}
+                  {listeningForReady && <span className="absolute inline-flex h-16 w-16 rounded-full bg-indigo-500/30 animate-ping" />}
                   <div className={`relative w-16 h-16 rounded-full flex items-center justify-center ${listeningForReady ? 'bg-indigo-600' : 'bg-gray-700'}`}>
                     <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-white" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4z"/>
@@ -333,51 +337,34 @@ export default function VideoCapture() {
 
                 <h3 className="text-white text-xl font-bold mb-2">Ready to begin?</h3>
                 <p className="text-gray-400 text-sm mb-1">
-                  {listeningForReady
-                    ? 'Say "Ready" or wait for the countdown'
-                    : 'Tap the button or wait for the countdown'}
+                  {listeningForReady ? 'Say "Ready" or wait for the countdown' : 'Tap the button or wait for the countdown'}
                 </p>
-                {listeningForReady && (
-                  <p className="text-indigo-400 text-xs mb-3">Microphone is active</p>
-                )}
-                {!listeningForReady && (
-                  <p className="text-gray-500 text-xs mb-3">Microphone not available</p>
-                )}
+                <p className={`text-xs mb-3 ${listeningForReady ? 'text-indigo-400' : 'text-gray-500'}`}>
+                  {listeningForReady ? 'Microphone is active' : 'Microphone not available'}
+                </p>
 
-                {/* Countdown ring */}
                 <div className="flex items-center justify-center mb-5">
                   <div className="relative w-14 h-14 flex items-center justify-center">
                     <svg className="absolute inset-0 w-14 h-14 -rotate-90" viewBox="0 0 56 56">
                       <circle cx="28" cy="28" r="24" fill="none" stroke="#374151" strokeWidth="4" />
-                      <circle
-                        cx="28" cy="28" r="24" fill="none"
-                        stroke="#6366f1" strokeWidth="4"
+                      <circle cx="28" cy="28" r="24" fill="none" stroke="#6366f1" strokeWidth="4"
                         strokeDasharray={`${2 * Math.PI * 24}`}
                         strokeDashoffset={`${2 * Math.PI * 24 * (1 - readyCountdown / 5)}`}
-                        className="transition-all duration-1000"
-                        strokeLinecap="round"
+                        className="transition-all duration-1000" strokeLinecap="round"
                       />
                     </svg>
                     <span className="text-white text-2xl font-black">{readyCountdown}</span>
                   </div>
                 </div>
 
-                <button
-                  onClick={handleStart}
-                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-colors text-base"
-                >
+                <button onClick={handleStart} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-colors text-base">
                   Start Now
                 </button>
-
-
-                <p className="text-gray-600 text-xs mt-4">
-                  Make sure you have 4–5 m of clear space to walk
-                </p>
+                <p className="text-gray-600 text-xs mt-4">Make sure you have 4–5 m of clear space to walk</p>
               </div>
             </div>
           )}
 
-          {/* Model loading overlay */}
           {!isLoaded && !showReadyPopup && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/70">
               <div className="text-center">
@@ -389,38 +376,29 @@ export default function VideoCapture() {
             </div>
           )}
 
-          {/* Model error */}
           {poseError && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/80 p-6">
               <div className="text-center">
                 <div className="text-4xl mb-3">⚠️</div>
                 <p className="text-red-400 font-semibold mb-2">Could not load pose detection model.</p>
                 <p className="text-gray-400 text-sm mb-4">Please check your connection and refresh.</p>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="px-4 py-2 bg-blue-600 rounded-lg text-white text-sm"
-                >
-                  Refresh
-                </button>
+                <button onClick={() => window.location.reload()} className="px-4 py-2 bg-blue-600 rounded-lg text-white text-sm">Refresh</button>
               </div>
             </div>
           )}
 
-          {/* Low light warning */}
           {lowLightWarning && (
             <div className="absolute top-10 left-4 right-4 bg-yellow-900/90 border border-yellow-600 rounded-lg p-2 text-xs text-yellow-200 text-center">
               Move to better lighting
             </div>
           )}
 
-          {/* No movement warning */}
           {noMovementWarning && store.isRecording && (
             <div className="absolute top-20 left-4 right-4 bg-orange-900/90 border border-orange-600 rounded-lg p-2 text-xs text-orange-200 text-center">
-              No movement detected — please start walking around your space
+              No movement detected — please start walking
             </div>
           )}
 
-          {/* REC indicator */}
           {store.isRecording && (
             <div className="absolute top-2 right-2 flex items-center gap-2 bg-black/60 rounded-full px-3 py-1">
               <div className="w-3 h-3 rounded-full bg-red-500 pulse-rec" />
@@ -428,40 +406,24 @@ export default function VideoCapture() {
             </div>
           )}
 
-          {/* Progress bar */}
           {store.isRecording && (
             <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-800">
-              <div
-                className="h-full bg-blue-500 transition-all duration-500"
-                style={{ width: `${totalProgress}%` }}
-              />
+              <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${totalProgress}%` }} />
             </div>
           )}
         </div>
 
-        {/* Stop button */}
         {store.isRecording && elapsed >= 45 && (
           <div className="mt-3 flex justify-center">
-            <button
-              onClick={stopRecording}
-              className="px-6 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl text-sm text-gray-300 font-medium"
-            >
+            <button onClick={stopRecording} className="px-6 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl text-sm text-gray-300 font-medium">
               Stop Early & Generate Report
             </button>
           </div>
         )}
       </div>
 
-      {/* Right: Live metrics + pass indicator */}
       <div className="md:w-2/5 space-y-4">
-        <LiveMetrics
-          cadence={liveCadence}
-          symmetry={liveSymmetry}
-          leftArch={liveLeftArch}
-          rightArch={liveRightArch}
-          leftStrike={liveLeftStrike}
-          rightStrike={liveRightStrike}
-        />
+        <LiveMetrics cadence={liveCadence} symmetry={liveSymmetry} leftArch={liveLeftArch} rightArch={liveRightArch} leftStrike={liveLeftStrike} rightStrike={liveRightStrike} />
         <PassIndicator />
       </div>
     </div>

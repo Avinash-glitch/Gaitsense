@@ -41,14 +41,30 @@ export default function CameraSetup() {
 
   const startCamera = async () => {
     try {
+      // Get permission first so device labels become available
+      const temp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+      temp.getTracks().forEach((t) => t.stop())
+
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const videoDevices = devices.filter((d) => d.kind === 'videoinput')
+
+      const rearCamera =
+        videoDevices.find((d) => {
+          const l = d.label.toLowerCase()
+          return l.includes('back') || l.includes('rear') || l.includes('environment') || l.includes('facing back')
+        }) ?? videoDevices[0]
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'environment' },
+        video: rearCamera?.deviceId
+          ? { deviceId: { exact: rearCamera.deviceId }, width: { ideal: 640 }, height: { ideal: 480 } }
+          : { facingMode: 'environment', width: 640, height: 480 },
         audio: false,
       })
+
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        videoRef.current.play()
+        await videoRef.current.play()
         updateCheck('Camera detected', 'ok')
       }
     } catch (err) {
