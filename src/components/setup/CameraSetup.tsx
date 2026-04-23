@@ -139,10 +139,75 @@ export default function CameraSetup() {
     return () => clearInterval(interval)
   }, [isLoaded, detectPose])
 
-  const statusIcon = (status: CheckItem['status']) =>
-    status === 'ok' ? '✓' : status === 'fail' ? '✗' : '…'
-  const statusColor = (status: CheckItem['status']) =>
-    status === 'ok' ? 'text-green-400' : status === 'fail' ? 'text-red-400' : 'text-gray-500'
+  const StatusIcon = ({ status }: { status: CheckItem['status'] }) => {
+    if (status === 'ok') {
+      return (
+        <div className="w-6 h-6 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center flex-shrink-0">
+          <svg className="w-3.5 h-3.5 text-green-400" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="2,6 5,9 10,3" />
+          </svg>
+        </div>
+      )
+    }
+    if (status === 'fail') {
+      return (
+        <div className="w-6 h-6 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center flex-shrink-0">
+          <svg className="w-3.5 h-3.5 text-red-400" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <line x1="3" y1="3" x2="9" y2="9" />
+            <line x1="9" y1="3" x2="3" y2="9" />
+          </svg>
+        </div>
+      )
+    }
+    return (
+      <div className="w-6 h-6 flex items-center justify-center flex-shrink-0">
+        <div className="w-4 h-4 rounded-full border-2 border-gray-600 border-t-gray-400 animate-spin" />
+      </div>
+    )
+  }
+
+  const TIPS = [
+    {
+      tip: 'Place phone at knee height on a chair or stack of books',
+      icon: (
+        <svg className="w-5 h-5 text-gray-500 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="5" y="3" width="14" height="10" rx="1" />
+          <path d="M8 13v4" /><path d="M16 13v4" />
+          <line x1="3" y1="17" x2="21" y2="17" />
+          <line x1="3" y1="21" x2="21" y2="21" />
+        </svg>
+      ),
+    },
+    {
+      tip: 'Stand 3–4 meters away from the phone',
+      icon: (
+        <svg className="w-5 h-5 text-gray-500 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <polyline points="3,9 3,15" />
+          <polyline points="21,9 21,15" />
+        </svg>
+      ),
+    },
+    {
+      tip: 'Ensure 3×3m of clear walking space behind you',
+      icon: (
+        <svg className="w-5 h-5 text-gray-500 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="5" r="2" />
+          <path d="M12 7v5l-3 5" />
+          <path d="M12 12l3 5" />
+        </svg>
+      ),
+    },
+    {
+      tip: 'Remove shoes for best arch detection',
+      icon: (
+        <svg className="w-5 h-5 text-gray-500 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+          <path d="M4 16 Q8 10 14 12 Q18 14 20 16 L20 18 Q14 20 4 18 Z" />
+          <path d="M14 12 L16 6" />
+        </svg>
+      ),
+    },
+  ]
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
@@ -154,7 +219,10 @@ export default function CameraSetup() {
         <div className="relative bg-gray-900 rounded-xl overflow-hidden aspect-video border border-gray-800">
           {camError ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-4">
-              <span className="text-3xl mb-2">📷</span>
+              <svg className="w-10 h-10 text-gray-600 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 7h-3.5L14 4h-4L7.5 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
               <p className="text-red-400 font-semibold mb-1">Camera Access Denied</p>
               <p className="text-gray-500 text-sm">{camError}</p>
               <div className="mt-4 text-xs text-gray-600 space-y-1">
@@ -200,9 +268,7 @@ export default function CameraSetup() {
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
             {checks.map((check) => (
               <div key={check.label} className="flex items-center gap-3">
-                <span className={`font-mono font-bold text-lg w-6 text-center ${statusColor(check.status)}`}>
-                  {statusIcon(check.status)}
-                </span>
+                <StatusIcon status={check.status} />
                 <span className={`text-sm ${check.status === 'ok' ? 'text-gray-200' : 'text-gray-500'}`}>
                   {check.label}
                 </span>
@@ -211,14 +277,9 @@ export default function CameraSetup() {
           </div>
 
           <div className="space-y-2">
-            {[
-              { icon: '🪑', tip: 'Place phone at knee height on a chair or stack of books' },
-              { icon: '📏', tip: 'Stand 3–4 meters away from the phone' },
-              { icon: '🚶', tip: 'Ensure 3×3m of clear walking space behind you' },
-              { icon: '🦶', tip: 'Remove shoes for best arch detection' },
-            ].map(({ icon, tip }) => (
+            {TIPS.map(({ icon, tip }) => (
               <div key={tip} className="flex gap-3 bg-gray-900 border border-gray-800 rounded-lg p-3">
-                <span className="text-lg">{icon}</span>
+                {icon}
                 <p className="text-xs text-gray-400 leading-relaxed">{tip}</p>
               </div>
             ))}
